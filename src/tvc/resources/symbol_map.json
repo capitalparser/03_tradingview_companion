@@ -1,0 +1,13 @@
+{
+  "_comment": "사용자 한국어 종목명/별칭 → TradingView ticker. Codex가 워치리스트 시드 입력 후 확장. 키는 normalize 후 lowercase 권장.",
+  "삼성전자": "KRX:005930",
+  "SK하이닉스": "KRX:000660",
+  "카카오": "KRX:035720",
+  "네이버": "KRX:035420",
+  "셀트리온": "KRX:068270",
+  "엔비디아": "NASDAQ:NVDA",
+  "애플": "NASDAQ:AAPL",
+  "마이크로소프트": "NASDAQ:MSFT",
+  "테슬라": "NASDAQ:TSLA",
+  "구글": "NASDAQ:GOOGL"
+}

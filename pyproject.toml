@@ -1,0 +1,63 @@
+[project]
+name = "tradingview-companion"
+version = "0.1.0"
+description = "Telegram-first chart analyst for TradingView Desktop, powered by tradingview-mcp (CDP) and Claude SDK"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+authors = [{ name = "Kim Kyung-jun" }]
+license = { text = "MIT" }
+
+dependencies = [
+    "python-telegram-bot>=21.0",
+    "anthropic>=0.40.0",
+    "mcp>=1.0.0",
+    "python-dotenv>=1.0.1",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.5.0",
+    "structlog>=24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "respx>=0.21.0",
+    "ruff>=0.6.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+tvc = "tvc.bot.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tvc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "live: requires live external services (TradingView Desktop, Telegram, Anthropic). Deselected by default.",
+    "slow: long-running tests.",
+]
+addopts = "-m 'not live'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["N802", "N806"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]

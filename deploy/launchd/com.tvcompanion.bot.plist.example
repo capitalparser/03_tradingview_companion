@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example launchd plist for the Telegram bot.
+
+  Setup:
+    1. cp this file to ~/Library/LaunchAgents/com.tvcompanion.bot.plist
+    2. edit absolute paths below to match your install
+    3. launchctl load ~/Library/LaunchAgents/com.tvcompanion.bot.plist
+    4. tail logs at /tmp/tvc-bot.{out,err}.log
+
+  Codex 인계 가드레일:
+    - Production은 caffeinate로 sleep 방지 권장 (별도 plist 또는 시스템 설정).
+    - .env는 절대 plist에 임베드 X. EnvironmentVariables 키도 가급적 비워둠.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tvcompanion.bot</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/REPLACE_ME/vault/01_Projects/03_tradingview_companion</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/REPLACE_ME/.local/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>-m</string>
+        <string>tvc.bot</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/tvc-bot.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/tvc-bot.err.log</string>
+</dict>
+</plist>

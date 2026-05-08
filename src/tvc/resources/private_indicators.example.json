@@ -1,0 +1,24 @@
+{
+  "_comment": "사용자가 차트에 적재한 프라이빗 인디케이터의 study name 목록. 이 파일은 example. 실제 사용 시 private_indicators.json으로 복사 후 채우고 git ignore. study name은 TradingView 앱에서 인디케이터 우클릭 → Properties → ID 확인.",
+  "indicators": [
+    {
+      "id": "EXAMPLE_엔트리_시그널",
+      "extract": ["plot:signal", "label:entry"],
+      "priority": "high",
+      "interpret_as": "buy_signal"
+    },
+    {
+      "id": "EXAMPLE_청산_시그널",
+      "extract": ["label:exit"],
+      "priority": "high",
+      "interpret_as": "sell_signal"
+    },
+    {
+      "id": "EXAMPLE_돌파_시그널",
+      "extract": ["label:breakout"],
+      "priority": "medium",
+      "interpret_as": "breakout"
+    }
+  ],
+  "standard_fallback": ["EMA", "RSI", "MACD", "Volume"]
+}
