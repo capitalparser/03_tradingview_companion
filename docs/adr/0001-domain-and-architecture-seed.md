@@ -44,6 +44,8 @@ TradingView Desktop의 Chrome DevTools Protocol(CDP, port 9222)을 활용하는 
 
 또한 차단 리스트(config/blocked_auditors.yaml)는 동일 정책을 manual sync. 코드 import는 여전히 금지. 자동 동기화 패턴은 TODOS.md TODO-3.
 
+**Update 2026-05-09 (ADR-0003 AD-10) — webhook payload sharing**: 03이 02의 read-only HTTP endpoint(`GET /signals/{ticker}`)를 호출하는 단방향 의존 허용. webhook v6.1 spec 발견 후 pull 경로의 데이터 source가 MCP 차트 추출에서 02 webhook payload로 pivot. 02 → 03 의존은 여전히 금지 (양방향 차단). 코드 import 금지는 그대로. audit-safety 정책도 02 결정을 payload로 받아 표시 → AD-8의 manual sync 부담 사라짐. ADR-0003 참조.
+
 ### 분기 4: 클라우드 vs 홈 머신
 
 - **A. 클라우드에 TV Desktop xvfb 헤드리스 실행**

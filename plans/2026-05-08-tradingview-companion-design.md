@@ -16,35 +16,40 @@
 - 두 프로젝트는 코드/import 공유 X, 환경변수(Telegram token)만 별도 관리
 - GitHub: **public repo** (인디케이터 소스는 어차피 TradingView 서버 측. 민감 파일은 .gitignore)
 
-## Vision (단일 그림)
+## Vision (Option B 후, 2026-05-09)
 
 ```
-┌─────────────── 모바일 Telegram (단일 인터페이스) ───────────────┐
-│                                                                │
-│  ⬇ Push (자동)                       ⬆ Pull (인터랙티브)         │
-│                                                                │
-└────────────┬─────────────────────────────────┬─────────────────┘
-             │                                 │
-             │                                 │
-   ┌─────────▼──────────┐           ┌──────────▼──────────────┐
-   │  Fly.io (이미 동작)  │           │  홈 머신 (신규)            │
-   │  audit_safe_signals │           │  03_tradingview_companion│
-   │                    │           │                         │
-   │  TV alert webhook  │           │  Telegram bot (long poll)│
-   │  → 감사인 필터      │           │  → Claude SDK            │
-   │  → Telegram push   │           │  → tradingview-mcp       │
-   │                    │           │  → TV Desktop (CDP 9222) │
-   └────────────────────┘           └─────────────────────────┘
-             ▲                                 ▲
-             │ webhook POST                    │ CDP
-             │                                 │
-   ┌─────────┴─────────────────────────────────┴─────────────────┐
-   │                  TradingView Desktop (홈 머신)                │
-   │  - 사용자 로그인 상태                                          │
-   │  - 프라이빗 인디케이터 적재된 차트 템플릿                          │
-   │  - alert이 webhook으로 발사됨                                  │
-   └────────────────────────────────────────────────────────────┘
+┌────────────── 모바일 Telegram (단일 봇, AD-6) ──────────────┐
+│                                                             │
+│  ⬇ Push (alert 자동)               ⬆ Pull (인터랙티브 질의)   │
+│                                                             │
+└──────────┬───────────────────────────────────┬──────────────┘
+           │                                   │
+           │ Telegram send                     │ Telegram long-poll
+           │                                   │
+   ┌───────▼────────────┐               ┌──────▼──────────────┐
+   │  Fly.io (Tokyo)    │               │  홈 머신 (macOS)      │
+   │  02_audit_safe_    │  ◀─HTTP GET── │  03_tradingview_     │
+   │  signals (확장)     │  /signals/... │  companion (신규)     │
+   │                    │   (AD-9, 10)  │                     │
+   │  +webhook 수신     │               │  +Telegram bot       │
+   │  +audit 필터       │               │  +Claude Agent SDK   │
+   │  +Telegram push    │               │  +EndpointClient     │
+   │  +state.db (raw    │               │  +SQLite (AD-4)      │
+   │   payload 보존)    │               │  +UsageGuard (AD-3)  │
+   │  +GET /signals     │               │  (MCP는 부수 — 옵션)  │
+   └─────────▲──────────┘               └─────────────────────┘
+             │ webhook POST
+             │
+   ┌─────────┴────────────────────────────────────────────────┐
+   │             TradingView Desktop (홈 머신)                  │
+   │  - 자동매매용 통합지표 v3.2 적재된 차트                       │
+   │  - 워치리스트 종목별 alert URL 등록 (push 발사)              │
+   │  - (선택) MCP CDP 9222 — 03이 스크린샷 요청 시만 활성        │
+   └─────────────────────────────────────────────────────────┘
 ```
+
+**핵심 데이터 흐름 (AD-9, AD-10)**: 03 pull → `httpx GET https://02.fly.dev/signals/{ticker}?timeframe=...&secret=...` → 02가 state.db에서 가장 최근 webhook payload (37필드 v6.1) + audit_decision 반환 → Claude가 한국어 해석. 차트 plot/label 추출 불필요.
 
 ## Goal / Non-goals
 
@@ -97,16 +102,17 @@
 - **선택 보강** (out of MVP): 통과한 alert에 대해 03이 차트 스크린샷 생성하는 "screenshot service"를 03에 추가하고, 02가 그걸 호출 — **또는** 02가 alert을 broker(Redis/file)에 적재 → 03이 polling — isolation 원칙 위반 우려 있어 **MVP에서는 안 건드림**
 - **권장 MVP 형태**: 워치리스트 종목들의 alert webhook URL을 02_audit_safe_signals와 동일 endpoint에 추가 등록만 — Telegram 메시지 prefix로 구분
 
-### Pull 경로 (신규, 03의 핵심)
+### Pull 경로 (Option B 후, AD-9)
 1. **사용자 → Telegram**: `삼성전자 봐줘`, `엔비디아 위클리`, `워치리스트 시그널`
-2. **bot 핸들러** → 메시지 파싱 → Claude SDK 호출 prompt 구성
-3. **Claude SDK** → tradingview-mcp 도구 사용:
-   - `chart_set_symbol`, `chart_set_timeframe`
-   - `data_get_study_values` (프라이빗 인디케이터 화이트리스트 기반)
-   - `chart_get_state` (OHLC, 추세)
-   - `capture_screenshot` (옵션)
-4. **Claude 해석** → 한국어 답변 생성
-5. **bot → Telegram**: 텍스트 + (옵션) 스크린샷 첨부
+2. **bot 핸들러** → 메시지 파싱 (자연어 → ticker, timeframe, 명령 추출)
+3. **EndpointClient.get_latest(ticker, timeframe)** → 02 Fly.io의 `GET /signals/...`
+   - 응답: 37필드 webhook payload + audit_decision + received_at
+   - 누락 (해당 종목/TF alert 미발화) → null 응답 → graceful 메시지
+4. **Claude Agent SDK** → 37필드 payload + audit_decision + analyze_prompt(webhook 의미 학습됨)을 컨텍스트로 한국어 해석 생성
+5. **bot → Telegram**: 텍스트 + 옵션 스크린샷 (스크린샷만 MCP 호출)
+6. **`scratchpad`/MCP 보조 (옵션, 사용자 명시 요청 시)**:
+   - "현재 차트 보여줘" → MCP capture_screenshot
+   - "1H로 봐줘" 후 02에 1H payload 없으면 → MCP로 즉석 chart_set_timeframe 후 추가 분석 (degraded mode)
 
 ### 인증
 - Telegram bot이 **사용자 본인 chat_id 화이트리스트**만 허용 — 외부 침입 차단
@@ -240,48 +246,61 @@ TradingView Desktop alert 발화
 
 이번 plan 실행 중 이미 처리됨. https://github.com/capitalparser/03_tradingview_companion 생성 + scaffold 푸시.
 
-### Phase 0b — MCP feasibility (CRITICAL — 진행 전 GO/NO-GO 게이트)
+### Phase 0b — 02 endpoint feasibility (CRITICAL — 진행 전 GO/NO-GO, ADR-0003 후 재정의)
 
 **진정한 Phase 0**. 이 단계 통과 못 하면 Phase 1+ 진행 X.
 
-- [ ] TradingView Desktop 설치 + `--remote-debugging-port=9222` 플래그 launch 검증 (`open -a` 방식이 안 되면 `/Applications/TradingView.app/Contents/MacOS/TradingView` 직접 실행 fallback)
-- [ ] `curl localhost:9222/json/version` 정상 응답
-- [ ] tradingview-mcp의 `tv_health_check` 도구 직접 호출
-- [ ] **결정적 검증**: 사용자 차트에 프라이빗 인디케이터 1개 적재 → MCP `data_get_study_values`로 plot/label 값을 실제로 읽을 수 있는지 raw inspection. **읽을 수 없으면 STOP — plan 폐기 또는 큰 재설계**.
-- [ ] tradingview-mcp가 우리 가정한 도구명 (`chart_set_symbol`, `chart_set_timeframe`, `chart_get_state`, `data_get_study_values`, `capture_screenshot`)을 모두 노출하는지 `tv_list_tools` 또는 README로 확인 (가정이 fiction 아닌지)
-- [ ] **Goal**: 다음 모든 답이 Yes — (1) TV Desktop CDP launch OK, (2) MCP 연결 OK, (3) 프라이빗 인디케이터 plot/label 값 추출 OK, (4) 가정한 도구명 실재.
+**02 측 prerequisite (별도 spec/plan 진행)**:
+- [ ] 02 webhook.py에 `atr_multiple`, `atr_dot`, `atr_dot_threshold` 3필드 추가 (Pydantic, ~5분)
+- [ ] 02 state.db에 `webhooks(id, ticker, timeframe, type, payload_json, received_at, audit_decision)` 테이블 추가 + INSERT 로직 (~15분)
+- [ ] 02 server.py에 `GET /signals/{ticker}?timeframe=...&secret=...` 라우트 추가 (~10분)
+- [ ] Fly.io 배포 (~5분)
 
-### Phase 1 — Bare-bones bot (Telegram echo + Claude SDK)
-- [ ] `03_tradingview_companion` 디렉토리 + Python 스캐폴드
-- [ ] `.env` 셋업, chat_id 화이트리스트
-- [ ] Telegram bot이 메시지 받으면 Claude SDK로 단순 echo 응답
-- [ ] **Goal**: bot 인프라 + Claude API 통합 검증
+**03 측 검증**:
+- [ ] 사용자가 워치리스트 1종목 alert을 TV에서 발사 → 02 수신 + state.db `webhooks` row 1개 확인
+- [ ] `curl https://02.fly.dev/signals/KRX:005930?timeframe=240&secret=...` → 37필드 JSON + audit_decision 정상 수신
+- [ ] 03 홈 머신에서 같은 호출 → Tokyo region latency 100ms 이하 확인
+- [ ] **Goal**: 02 측 작업 통과 + 03이 read endpoint로 payload 받음 = GO. 하나라도 실패 시 02 디버그 후 재시도.
 
-### Phase 2 — MCP 도구 통합
-- [ ] Claude SDK가 tradingview-mcp를 stdio로 spawn
-- [ ] `삼성전자 봐줘` → 차트 전환 + 표준 지표 추출 + Telegram 응답
-- [ ] **Goal**: end-to-end 단순 케이스 동작
+**MCP 검증은 Phase 5+로 격하** (스크린샷 보조 기능에만 필요):
+- [ ] (선택) TV Desktop CDP launch — Phase 5 스크린샷 기능 켤 때
+- [ ] (선택) `tv_health_check` 도구 호출
+- 즉 MCP가 안 돼도 Phase 1-4 데이터 흐름은 정상 동작
 
-### Phase 3 — 프라이빗 인디케이터 화이트리스트
-- [ ] 사용자가 차트에서 study name 정확히 추출 → JSON 작성
-- [ ] `data_get_study_values`로 프라이빗 시그널 raw 출력 → Telegram에 그대로 표시 (디버그)
-- [ ] 분석 프롬프트에서 시그널 발화 여부 해석 추가
-- [ ] **Goal**: 프라이빗 시그널이 응답에 포함됨
+### Phase 1 — Bare-bones bot + EndpointClient
+- [ ] `src/tvc/source/endpoint.py` 신규 — `httpx.AsyncClient`로 02 GET 호출 (timeout 5s, retry 1회 with backoff)
+- [ ] `Settings`에 `audit_signals_base_url`, `audit_signals_secret` 추가
+- [ ] Telegram bot 메시지 받으면 02 `/healthz` 호출 결과 + Claude ping을 echo 응답
+- [ ] chat_id 화이트리스트 동작 + 비인가 거부 메시지
+- [ ] **Goal**: bot 인프라 + 02 endpoint 연결성 검증
 
-### Phase 4 — 컨텍스트 유지 + 후속 질의
-- [ ] chat_id별 마지막 symbol/timeframe in-memory 저장
-- [ ] `위클리도`, `스크린샷` 등 단축 명령 처리
-- [ ] **Goal**: 자연스러운 대화 흐름
+### Phase 2 — Claude 해석 통합 (Option B 핵심)
+- [ ] `bot/handlers.py: handle_text` — `symbol_map.json`로 종목명 → ticker (deterministic), timeframe 추출
+- [ ] `Analyst.analyze_symbol`:
+  1. `EndpointClient.get_latest(ticker, timeframe)` 호출
+  2. 누락 시 graceful ("최근 알림 없음 — TV alert URL 등록 확인")
+  3. payload + audit_decision 받아서 Claude `query()`에 webhook spec(`docs/specs/webhook_v6_1.md`) + 37필드 + audit_decision 컨텍스트로 전달
+  4. 한국어 해석 응답 + audit_decision SKIP/MANUAL_VERIFY면 ⚠️ prefix
+- [ ] prompt caching: webhook spec + analyze_prompt에 `cache_control={"type": "ephemeral"}`
+- [ ] **Goal**: 02 endpoint → 자연어 한국어 해석 end-to-end (`삼성전자 봐줘` 동작)
 
-### Phase 5 — 워치리스트 일괄 + 자동 시작 (재설계)
+### Phase 3 — 컨텍스트 유지 + 후속 질의 (AD-4)
+- [ ] `src/tvc/storage.py: SQLiteConversationStore` 구현 — chat_id → (last_symbol, last_timeframe)
+- [ ] `위클리도`, `1시간봉` 같은 후속 명령 처리 — store에서 last_symbol 조회 + 새 timeframe으로 endpoint 재조회
+- [ ] **Goal**: 자연스러운 대화 흐름, bot 재시작 후 동일 동작
 
-**Codex outside voice 반영**: 종목당 LLM 호출 X. 결정론적 추출 + 1회 LLM 요약.
-- [ ] 워치리스트 30종목 순회: MCP study values 추출만 (LLM 호출 없음)
-- [ ] 코드 규칙으로 "BUY 발화 시그널" 필터링 (단순 lookup, deterministic)
+### Phase 4 — 워치리스트 일괄 (AD-7, Option B 재설계)
+- [ ] 워치리스트 30종목 순회: 각 종목 02 endpoint 호출 (LLM 호출 없음)
+- [ ] 코드 규칙으로 "BUY/CHECK 발화 시그널" 필터링 (`action == "BUY"` deterministic)
 - [ ] 발화 종목 N개 모아서 LLM 1회 호출로 자연어 요약
-- [ ] 진행 중 5종목당 점진 메시지 ("[3/30] 처리 중") — AD-2
+- [ ] 진행 중 10종목당 점진 메시지 ("[10/30] 조회 중") — AD-2 (단 02 endpoint는 mutex 불필요, MCP만 lock)
+- [ ] **Goal**: 워치리스트 30종목 ~10초 이내 응답 (endpoint = ~100ms × 30 + LLM 한 번 ~3s ≈ 6-7초)
+
+### Phase 5 — 운영 자동화 + MCP 보조 기능
 - [ ] launchd plist + caffeinate 셋업
-- [ ] **Goal**: 24/7 운영 준비, 일괄 비용 90% 절감
+- [ ] (선택) MCP wiring: `capture_screenshot` 한 가지 도구만. lazy spawn (사용자 명시 요청 시)
+- [ ] (선택) 사용자가 "1H 봐줘"인데 02에 1H payload 없을 때 MCP fallback (degraded mode 명시 응답)
+- [ ] **Goal**: 24/7 운영 준비. MCP는 nice-to-have, 핵심 기능에 영향 X
 
 ### ~~Phase 6 (선택) — Push 경로 보강~~  *(제거, 별도 spec으로 분리)*
 plan-eng-review에서 결정: ADR-0001 isolation 원칙과의 갈등이 명확하지 않고 가치 검증 미흡. MVP 운영 1-2개월 후 패턴이 보이면 별도 spec으로 재검토.

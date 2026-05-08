@@ -20,8 +20,14 @@ class Settings(BaseSettings):
     telegram_authorized_chat_ids: frozenset[int] = Field(..., alias="TELEGRAM_AUTHORIZED_CHAT_IDS")
     anthropic_api_key: str = Field(..., alias="ANTHROPIC_API_KEY")
     anthropic_model: str = Field(default="claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
+
+    # 02 read endpoint (ADR-0003 Option B 1차 데이터 소스)
+    audit_signals_base_url: str = Field(..., alias="AUDIT_SIGNALS_BASE_URL")
+    audit_signals_secret: str = Field(..., alias="AUDIT_SIGNALS_SECRET")
+
+    # MCP는 부수 기능 (스크린샷 등). 미설치 환경에서도 핵심 동작 OK.
     tv_debug_port: int = Field(default=9222, alias="TV_DEBUG_PORT")
-    tv_mcp_server_path: Path = Field(..., alias="TV_MCP_SERVER_PATH")
+    tv_mcp_server_path: Path | None = Field(default=None, alias="TV_MCP_SERVER_PATH")
 
     @field_validator("telegram_authorized_chat_ids", mode="before")
     @classmethod

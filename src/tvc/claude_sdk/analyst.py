@@ -1,12 +1,12 @@
-"""Claude Agent SDK 통합 — 분석 오케스트레이터.
+"""Claude Agent SDK 통합 — 분석 오케스트레이터 (Option B, ADR-0003).
 
-설계 의도 (plan-eng-review AD-1, AD-2, AD-3, AD-4):
-- bot handler가 호출하는 단일 진입점: `analyze_symbol(...)`, `analyze_watchlist(...)`
-- claude-agent-sdk(`query`)가 tool loop와 MCP stdio spawn을 자동 처리
-- MCP 자식 프로세스는 SDK가 보유. Bot startup에 1회 spawn, lifetime 동안 영구 (AD-1)
-- 모든 MCP 호출은 `_lock: asyncio.Lock`으로 직렬화 (AD-2 mutex)
-- 호출 전 UsageGuard 체크 (AD-3 cost cap), 위반 시 raise CostCapExceeded
-- Claude session_id를 ConversationStore에 기록해서 SDK `resume` 옵션으로 복원 (AD-4)
+설계 의도 (AD-3, AD-4, AD-9):
+- 1차 데이터 소스: `EndpointClient.get_latest()` (02의 webhook payload, 37필드 v6.1)
+- Claude Agent SDK는 자연어 해석에만 사용. tool loop는 단순함 (MCP 보조 기능 시만)
+- 모든 query 전 UsageGuard 체크 (AD-3 cost cap)
+- chat_id별 (last_symbol, last_timeframe)은 ConversationStore (AD-4)
+- session_id는 logging만, SDK resume 비활성 (stale chart context 위험)
+- MCP는 보조 (스크린샷 요청 시 lazy spawn, lock 적용)
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from tvc.source.endpoint import EndpointClient, SignalRecord
 from tvc.storage import ConversationStore, UsageGuard
 
 
@@ -38,40 +39,39 @@ class CostCapExceeded(Exception):
 
 
 class Analyst:
-    """Claude Agent SDK 기반 분석기.
+    """Option B 기반 분석기.
 
     Codex 인계 가드레일:
-    - `__init__`은 dependencies 주입만 (mcp_server_path, system_prompt, ConversationStore, UsageGuard).
-    - SDK는 `query()` 함수형. `ClaudeAgentOptions`에 `mcp_servers={"tradingview": {...}}`로 지정 → SDK가 자동 spawn (AD-1).
-    - 모든 MCP-touching 메서드는 `async with self._lock:` (AD-2).
-    - 분석 system_prompt는 정적 → SDK의 prompt cache 활용 (Anthropic API caching).
-    - 응답 텍스트는 절대 silent fallback 금지. MCP 실패 시 `ChartOpsError` 그대로 raise → handler 변환.
+    - `__init__`은 dependencies 주입만 (EndpointClient, ConversationStore, UsageGuard, system_prompt, model).
+    - `analyze_symbol`은 EndpointClient.get_latest()를 1차 호출. payload 누락 시 graceful 응답.
+    - Claude `query()` 호출 시 system_prompt = analyze_prompt + webhook spec (정적, cache_control=ephemeral).
+    - 응답 텍스트는 절대 silent fallback 금지. EndpointError → handler graceful 변환.
+    - audit_decision = SKIP/MANUAL_VERIFY → 응답 첫 줄에 ⚠️ prefix.
+    - MCP는 보조 — `analyze_with_screenshot()` 같은 별도 메서드에서만 lazy spawn + lock.
     """
 
     def __init__(
         self,
-        mcp_server_path: Path,
-        tv_debug_port: int,
-        system_prompt: str,
+        endpoint: EndpointClient,
         store: ConversationStore,
         usage: UsageGuard,
+        system_prompt: str,
+        webhook_spec_md: str,
         model: str = "claude-sonnet-4-6",
     ) -> None:
         raise NotImplementedError(
-            "Codex: store deps, init asyncio.Lock, build ClaudeAgentOptions with mcp_servers"
+            "Codex: store deps, build ClaudeAgentOptions with cache_control system_prompt"
         )
 
     async def analyze_symbol(
         self,
         chat_id: int,
         symbol: str,
-        timeframe: str = "1D",
-        include_screenshot: bool = False,
-        private_indicators: Sequence[str] = (),
+        timeframe: str = "240",  # v6.1 webhook의 timeframe 표기 ('240' = 4H, 'D' = daily, 'W' = weekly)
     ) -> AnalysisResult:
-        """단일 종목 분석. SDK query() 호출, MCP 도구는 자동 사용."""
+        """1) EndpointClient.get_latest 2) usage cap 체크 3) Claude query() 4) 응답."""
         raise NotImplementedError(
-            "Codex: build prompt (symbol/timeframe/indicators), call query() with resume=session_id from store, return AnalysisResult"
+            "Codex: get_latest, if payload None return graceful, else build context (37 fields + audit + spec), query, return"
         )
 
     async def analyze_followup(
@@ -79,21 +79,35 @@ class Analyst:
         chat_id: int,
         timeframe_or_command: str,
     ) -> AnalysisResult:
-        """후속 질의 ('위클리도', '스크린샷'). store에서 last_symbol 조회 + SDK resume."""
+        """후속 질의 ('위클리도'). store에서 last_symbol 조회 + 새 timeframe으로 endpoint 재조회."""
         raise NotImplementedError(
-            "Codex: load (symbol, _, session_id) from store, call query() with resume"
+            "Codex: load (symbol, _) from store, call analyze_symbol with new timeframe"
         )
 
     async def analyze_watchlist(
         self,
         chat_id: int,
-        watchlist: Sequence[str],
+        watchlist: Sequence[tuple[str, str]],  # [(ticker, timeframe), ...]
         progress_callback: object,
     ) -> AnalysisResult:
-        """워치리스트 일괄 (AD-2 점진 응답).
+        """워치리스트 일괄 (AD-7 deterministic + 1회 LLM).
 
-        progress_callback은 5종목 처리 끝마다 호출되어 Telegram 점진 메시지 송신.
+        1) 각 종목 EndpointClient.get_latest (mutex 불필요 — endpoint는 동시 호출 OK)
+        2) 발화 시그널 (action == "BUY") 코드 필터 — LLM 호출 X
+        3) 발화 종목 N개 모아서 LLM 1회 요약
+        4) progress_callback은 10종목 처리마다 호출
         """
         raise NotImplementedError(
-            "Codex: iterate watchlist with lock, call progress_callback every 5, summarize firing only"
+            "Codex: gather endpoint calls, filter action=='BUY', single LLM summary"
+        )
+
+    async def analyze_with_screenshot(
+        self,
+        chat_id: int,
+        symbol: str,
+        timeframe: str = "240",
+    ) -> AnalysisResult:
+        """MCP 보조 기능 — capture_screenshot 포함. lazy spawn (사용자 명시 요청 시만)."""
+        raise NotImplementedError(
+            "Codex: optional MCP path. Spawn tradingview-mcp lazily, capture_screenshot, attach to result"
         )
