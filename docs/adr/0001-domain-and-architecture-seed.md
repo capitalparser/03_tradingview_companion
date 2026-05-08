@@ -33,12 +33,16 @@ TradingView Desktop의 Chrome DevTools Protocol(CDP, port 9222)을 활용하는 
 ### 분기 3: 02와 코드 공유 vs Project Isolation
 
 - **A. 02의 telegram/auditor/pipeline 모듈 import 재활용**
-- **B. 완전 분리, project isolation 준수** ✅ **선택**
+- **B. 완전 분리, project isolation 준수** ✅ **선택 (with AD-6 예외)**
 
 이유:
 - vault 메모리 정책: "sibling 01_Projects/* are independent; no shared bots, env, or imports"
 - 02는 Fly.io stateless service, 03은 홈 머신 long-running bot — 운영 모델/배포 토폴로지가 다름
 - 의존이 양방향이 되면 한쪽 장애가 다른 쪽 전파
+
+**Update 2026-05-09 (ADR-0002 AD-6)**: 코드/import 분리는 유지. 단 **Telegram bot token은 명시적 공유 자원** (single Telegram interface vision 진정 달성). bot token .env 양쪽에 동일 값. 03이 long-poll, 02는 send only — 한 token에 한 long-poll process만 허용하므로 충돌 X. token revoke/rotate 시 양쪽 동시 갱신 필요 (운영 메모).
+
+또한 차단 리스트(config/blocked_auditors.yaml)는 동일 정책을 manual sync. 코드 import는 여전히 금지. 자동 동기화 패턴은 TODOS.md TODO-3.
 
 ### 분기 4: 클라우드 vs 홈 머신
 

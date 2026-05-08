@@ -15,9 +15,10 @@ dist/
 *.pem
 *.key
 
-# Sensitive resource files (trade-secret-adjacent)
-src/resources/private_indicators.json
-src/resources/watchlist.json
+# Sensitive runtime config (trade-secret-adjacent) — kept outside src/
+config/private_indicators.json
+config/watchlist.json
+config/blocked_auditors.yaml
 
 # Runtime data
 data/

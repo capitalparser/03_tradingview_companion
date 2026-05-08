@@ -40,6 +40,10 @@ Early. See `~/.claude/plans/shimmering-marinating-salamander.md` for the design 
 - Home machine must be awake (caffeinate / `pmset disablesleep`) for the pull path.
 - Push path is independent and runs on Fly.io via `02_audit_safe_signals`.
 
+## Disclaimer
+
+개인 자동화 용도. TradingView 데스크톱의 미공식 Chrome DevTools Protocol을 활용하므로 TradingView 약관 회색지대에 해당함. 상업적 사용/재배포/대량 운용은 TradingView ToS를 별도로 검토할 것. 본 프로젝트는 매수/매도 추천을 하지 않으며 투자 손실에 대한 책임을 지지 않는다.
+
 ## License
 
 MIT
