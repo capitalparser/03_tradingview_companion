@@ -1,0 +1,39 @@
+# Python
+.venv/
+*.pyc
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# Secrets / config
+.env
+.env.local
+*.pem
+*.key
+
+# Sensitive resource files (trade-secret-adjacent)
+src/resources/private_indicators.json
+src/resources/watchlist.json
+
+# Runtime data
+data/
+logs/
+*.db
+*.db-shm
+*.db-wal
+*.png
+*.jpg
+*.jpeg
+screenshots/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Claude Code local
+.claude/
